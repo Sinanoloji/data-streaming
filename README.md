@@ -1,6 +1,6 @@
 Airflow Containers
 ```bash
-  docker compose -f docker-compose-airflow up --build
+  docker compose -f docker-compose-airflow.yaml up --build
 ```
 Kafka Spark Cassandra Containers
 ```bash
