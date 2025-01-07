@@ -1,5 +1,9 @@
 version: '3'
 
+networks:
+  kafka-network:
+    driver: bridge
+
 services:
   zoo1:
     image:  bitnami/zookeeper:latest
@@ -9,64 +13,69 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_SERVER_ID: 1
       ZOOKEEPER_SERVERS: zoo1:2888:3888
+      ALLOW_ANONYMOUS_LOGIN: "yes"
     networks:
-      - kafka-network
-      - airflow-kafka
+      - kafka-network  
   
-  
-  kafka:
-    image: "bitnami/kafka:latest"
-    ports:
-      - '9094:9094'
+  broker:
+    image: apache/kafka:latest
+    container_name: broker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      - KAFKA_CFG_NODE_ID=0
-      - KAFKA_CFG_PROCESS_ROLES=controller,broker
-      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
-      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      - KAFKA_CFG_ZOOKEEPER_CONNECT:zoo1:2181
-      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
-      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
-    volumes:
-      - /var/lib/docker/volumes/kafka/_data
-    networks:
-      - kafka-network
-      - airflow-kafka
-  
-  kafka-ui:
-    container_name: kafka-ui-1
-    image: provectuslabs/kafka-ui:latest
-    ports:
-      - 8800:8800
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_ZOOKEEPER_CONNECT: zoo1:2181
     depends_on:
-      - kafka
-    environment:
-      KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: PLAINTEXT://kafka:9092
-      DYNAMIC_CONFIG_ENABLED: 'true'
+      - zoo1
+    volumes:
+      - "kafka_data:/opt/kafka/bin"
     networks:
       - kafka-network
-      - airflow-kafka
 
   spark:
     image: bitnami/spark:3
-    container_name: spark_master
     ports:
-      - 8085:8000
+      - 7077:7077
     environment:
-      - SPARK_UI_PORT=8080
+      - SPARK_UI_PORT=7077
       - SPARK_MODE=master
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
+    depends_on:
+      - broker
     volumes:
       - ./:/home
       - /var/lib/docker/volumes/spark-data/_data
     networks:
       - kafka-network
-      - airflow-kafka
 
-networks:
-  airflow-kafka:
-    external: true
-  kafka-network:
-    driver: bridge
+  cassandra:
+    image: cassandra:latest
+    hostname: cassandra
+    ports:
+      - 9042:9042
+    environment:
+      - MAX_HEAP_SIZE=512M
+      - HEAP_NEWSIZE=100M
+      - CASSANDRA_USERNAME=cassandra
+      - CASSANDRA_PASSWORD=cassandra
+    volumes:
+      - ./:/home
+      - /var/lib/cassandra
+    networks:
+      - kafka-network
+
+volumes:
+  kafka_data:
+    driver: local
